@@ -7,6 +7,10 @@ export default {
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
     './src/app/**/*.{js,ts,jsx,tsx,mdx}',
   ],
+  safelist: [ // For dynamic grid columns like grid-cols-8
+    // Safelist grid-cols-1 through grid-cols-12 for potential dynamic board sizes
+    ...Array.from({ length: 12 }, (_, i) => `grid-cols-${i + 1}`),
+  ],
   theme: {
     extend: {
       fontFamily: {
