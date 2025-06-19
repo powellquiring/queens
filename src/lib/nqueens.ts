@@ -34,10 +34,10 @@ function solveNQueensRecursive(
   const columns = Array.from({ length: N }, (_, i) => i);
   // Ensure Math.random is only called client-side if this function could run on server.
   // However, this will be called from a client component event handler.
-  for (let i = columns.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [columns[i], columns[j]] = [columns[j], columns[i]];
-  }
+  //for (let i = columns.length - 1; i > 0; i--) {
+  //  const j = Math.floor(Math.random() * (i + 1));
+  //  [columns[i], columns[j]] = [columns[j], columns[i]];
+  //}
 
   for (const col of columns) {
     if (isSafe(board, row, col, N)) {
