@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Chessboard } from "@/components/chessboard";
 import { type QueenPosition } from "@/lib/nqueens";
 import { useToast } from "@/hooks/use-toast";
-import { Sparkles, Trash2, ChevronRight } from "lucide-react";
+import { Sparkles, Trash2, ChevronRight, Square, Play, FastForward } from "lucide-react";
 
 const BOARD_SIZE = 8;
 
@@ -18,6 +18,18 @@ export default function HomePage() {
   // Add a new state to track temporarily highlighted squares
   const [highlightedSquare, setHighlightedSquare] = useState<{row: number, col: number} | null>(null);
   const [isToastActive, setIsToastActive] = useState(false);
+
+  // New state variables for solve control
+  const [isSolving, setIsSolving] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [solveState, setSolveState] = useState<{
+    attempts: number;
+    currentQueens: QueenPosition[];
+  } | null>(null);
+
+  // Use ref for immediate stop signal that can be checked in async loops
+  const shouldStopRef = useRef(false);
+
   const { toast } = useToast();
 
   useEffect(() => {
@@ -45,17 +57,23 @@ export default function HomePage() {
     }
   }, [queens, toast]);
 
-  const handleSolve = async () => {
+  const handleSolve = async (withDelay: boolean = true) => {
     if (!isClient || isToastActive) return;
 
+    setIsSolving(true);
+    shouldStopRef.current = false;
+    setIsPaused(false);
     setStatusMessage("Solving puzzle step by step...");
 
-    let attempts = 0;
+    let attempts = solveState?.attempts || 0;
     const maxAttempts = 1000; // Prevent infinite loops
-    let currentQueens: QueenPosition[] = [...queens]; // Start with current queens state
+    let currentQueens: QueenPosition[] = solveState?.currentQueens || [...queens]; // Start with current queens state or resume from saved state
+
+    // Clear saved state since we're starting/resuming
+    setSolveState(null);
 
     // Repeatedly call the common logic until all 8 queens are placed
-    while (currentQueens.length < BOARD_SIZE && attempts < maxAttempts) {
+    while (currentQueens.length < BOARD_SIZE && attempts < maxAttempts && !shouldStopRef.current) {
       attempts++;
 
       const result = placeOrMoveNextQueen(currentQueens);
@@ -63,6 +81,7 @@ export default function HomePage() {
       if (!result.success) {
         // No solution possible
         setStatusMessage("No solution found for this board size.");
+        setIsSolving(false);
         return;
       }
 
@@ -76,13 +95,31 @@ export default function HomePage() {
         setStatusMessage(result.message);
       }
 
-      // Add a small delay to make the solving process visible
-      const delay = result.message.includes("Backtracking") ? 200 : 300;
-      await new Promise(resolve => setTimeout(resolve, delay));
+      // Check if we should stop before the delay
+      if (shouldStopRef.current) {
+        // Save current state for potential resume
+        setSolveState({ attempts, currentQueens });
+        setIsPaused(true);
+        setIsSolving(false);
+        setStatusMessage("Solving paused. Choose an option to continue.");
+        return;
+      }
+
+      // Add a small delay to make the solving process visible (only if withDelay is true)
+      if (withDelay) {
+        const delay = result.message.includes("Backtracking") ? 200 : 300;
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
 
+    setIsSolving(false);
     if (currentQueens.length === BOARD_SIZE) {
       setStatusMessage("Puzzle solved step by step!");
+    } else if (shouldStopRef.current) {
+      // Save current state for potential resume
+      setSolveState({ attempts, currentQueens });
+      setIsPaused(true);
+      setStatusMessage("Solving paused. Choose an option to continue.");
     } else {
       setQueens([]);
       updateSafetyMap([]);
@@ -90,15 +127,41 @@ export default function HomePage() {
     }
   };
 
+  const handleStop = () => {
+    shouldStopRef.current = true;
+  };
+
+  const handleContinue = () => {
+    if (solveState) {
+      handleSolve(true); // Resume with delays
+    }
+  };
+
+  const handleFinish = () => {
+    if (solveState) {
+      handleSolve(false); // Resume without delays
+    }
+  };
+
+  const handleStopFinal = () => {
+    setSolveState(null);
+    setIsPaused(false);
+    setIsSolving(false);
+    shouldStopRef.current = false;
+    setStatusMessage("Solving stopped. Current state preserved.");
+  };
+
   const handleClear = () => {
-    if (isToastActive) return;
+    if (isToastActive || isSolving) return;
     setQueens([]);
     updateSafetyMap([]);
+    setSolveState(null);
+    setIsPaused(false);
     setStatusMessage("Board cleared. Place queens or click 'Solve'.");
   };
 
   const handleSquareClick = (row: number, col: number) => {
-    if (isToastActive) return;
+    if (isToastActive || isSolving) return;
 
     // Check if there's already a queen at this position
     const isQueenPresent = queens.some(q => q.row === row && q.col === col);
@@ -268,7 +331,7 @@ export default function HomePage() {
 
   // Add a function to place the next queen in a safe position
   const handleSolveNext = () => {
-    if (!isClient || isToastActive) return;
+    if (!isClient || isToastActive || isSolving || isPaused) return;
 
     const result = placeOrMoveNextQueen(queens);
     setStatusMessage(result.message);
@@ -290,7 +353,7 @@ export default function HomePage() {
               safetyMap={safetyMap}
               highlightedSquare={highlightedSquare}
               onSquareClick={handleSquareClick}
-              disabled={isToastActive}
+              disabled={isToastActive || isSolving}
               className="w-full max-w-md border-2 border-primary/20 rounded-lg"
             />
           ) : (
@@ -303,29 +366,67 @@ export default function HomePage() {
           </p>
         </CardContent>
         <CardFooter className="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4 pt-6">
-          <Button
-            onClick={handleSolve}
-            disabled={isToastActive}
-            className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow bg-primary hover:bg-primary/90 text-primary-foreground"
-          >
-            <Sparkles className="mr-2 h-5 w-5" /> Solve Puzzle
-          </Button>
-          <Button
-            onClick={handleSolveNext}
-            disabled={isToastActive}
-            variant="outline"
-            className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
-          >
-            <ChevronRight className="mr-2 h-5 w-5" /> Solve Next
-          </Button>
-          <Button
-            onClick={handleClear}
-            disabled={isToastActive}
-            variant="secondary"
-            className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
-          >
-            <Trash2 className="mr-2 h-5 w-5" /> Clear Board
-          </Button>
+          {!isPaused ? (
+            <>
+              <Button
+                onClick={isSolving ? handleStop : () => handleSolve(true)}
+                disabled={isToastActive}
+                className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow bg-primary hover:bg-primary/90 text-primary-foreground"
+              >
+                {isSolving ? (
+                  <>
+                    <Square className="mr-2 h-5 w-5" /> Stop
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="mr-2 h-5 w-5" /> Solve Puzzle
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={handleSolveNext}
+                disabled={isToastActive || isSolving}
+                variant="outline"
+                className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
+              >
+                <ChevronRight className="mr-2 h-5 w-5" /> Solve Next
+              </Button>
+              <Button
+                onClick={handleClear}
+                disabled={isToastActive || isSolving}
+                variant="secondary"
+                className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
+              >
+                <Trash2 className="mr-2 h-5 w-5" /> Clear Board
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                onClick={handleContinue}
+                disabled={isToastActive}
+                className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow bg-primary hover:bg-primary/90 text-primary-foreground"
+              >
+                <Play className="mr-2 h-5 w-5" /> Continue
+              </Button>
+              <Button
+                onClick={handleFinish}
+                disabled={isToastActive}
+                variant="outline"
+                className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
+              >
+                <FastForward className="mr-2 h-5 w-5" /> Finish
+              </Button>
+              <Button
+                onClick={handleStopFinal}
+                disabled={isToastActive}
+                variant="secondary"
+                className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
+              >
+                <Square className="mr-2 h-5 w-5" /> Stop
+              </Button>
+            </>
+          )}
         </CardFooter>
       </Card>
       <footer className="mt-8 text-center text-sm text-muted-foreground">
