@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Chessboard } from "@/components/chessboard";
-import { solveNQueens, type QueenPosition } from "@/lib/nqueens";
+import { type QueenPosition } from "@/lib/nqueens";
 import { useToast } from "@/hooks/use-toast";
 import { Sparkles, Trash2, ChevronRight } from "lucide-react";
 
@@ -45,17 +45,48 @@ export default function HomePage() {
     }
   }, [queens, toast]);
 
-  const handleSolve = () => {
+  const handleSolve = async () => {
     if (!isClient || isToastActive) return;
-    const solution = solveNQueens(BOARD_SIZE);
-    if (solution) {
-      setQueens(solution);
-      updateSafetyMap(solution);
-      setStatusMessage("Puzzle solved! A random solution is displayed.");
+
+    setStatusMessage("Solving puzzle step by step...");
+
+    let attempts = 0;
+    const maxAttempts = 1000; // Prevent infinite loops
+    let currentQueens: QueenPosition[] = [...queens]; // Start with current queens state
+
+    // Repeatedly call the common logic until all 8 queens are placed
+    while (currentQueens.length < BOARD_SIZE && attempts < maxAttempts) {
+      attempts++;
+
+      const result = placeOrMoveNextQueen(currentQueens);
+
+      if (!result.success) {
+        // No solution possible
+        setStatusMessage("No solution found for this board size.");
+        return;
+      }
+
+      // Update local queens from the result
+      currentQueens = result.newQueens;
+
+      // Update message to show solving progress
+      if (result.message.includes("placed")) {
+        setStatusMessage(`Solving... Queen ${currentQueens.length} ${result.message.split(' ').slice(2).join(' ')}`);
+      } else {
+        setStatusMessage(result.message);
+      }
+
+      // Add a small delay to make the solving process visible
+      const delay = result.message.includes("Backtracking") ? 200 : 300;
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    if (currentQueens.length === BOARD_SIZE) {
+      setStatusMessage("Puzzle solved step by step!");
     } else {
       setQueens([]);
       updateSafetyMap([]);
-      setStatusMessage("No solution found for this board size.");
+      setStatusMessage("Could not find solution within attempt limit.");
     }
   };
 
@@ -137,38 +168,40 @@ export default function HomePage() {
     setSafetyMap(newSafetyMap);
   };
 
-  // Add a function to place the next queen in a safe position
-  const handleSolveNext = () => {
-    if (!isClient || isToastActive) return;
-    
+  // Helper function to find the next valid queen position
+  const findNextQueenPosition = (currentQueens: QueenPosition[]): QueenPosition | null => {
+    const currentSafetyMap = calculateSafetyMap(currentQueens);
+
     // Find the next safe position
     for (let row = 0; row < BOARD_SIZE; row++) {
-      if (queens.some(q => q.row === row)) continue;
+      if (currentQueens.some(q => q.row === row)) continue;
       for (let col = 0; col < BOARD_SIZE; col++) {
         // Skip if there's already a queen in this row or column
-        if (queens.some(q => q.col === col)) continue;
-        
+        if (currentQueens.some(q => q.col === col)) continue;
+
         // Check if this position is safe
-        if (safetyMap[row][col]) {
-          const squareName = `${String.fromCharCode(65 + col)}${BOARD_SIZE - row}`;
-          setStatusMessage(`Queen placed at ${squareName}.`);
-          const newQueens = [...queens, { row, col }];
-          setQueens(newQueens);
-          updateSafetyMap(newQueens);
-          return;
+        if (currentSafetyMap[row][col]) {
+          return { row, col };
         }
       }
-      break
+      break; // If we reach here, no safe position found in a row - no solution with existing queens
     }
-    setStatusMessage("No safe position found moving queen on highest row forward or off board.");
+    return null;
+  };
 
-    let newHighestRowQueen = null
-    let newQueens = queens // overwritten below
-    for (; newHighestRowQueen === null; ) {
+  // Helper function to backtrack queens when no valid position is found
+  const backtrackQueens = (currentQueens: QueenPosition[]): QueenPosition[] => {
+    if (currentQueens.length === 0) return [];
+
+    let newQueens = [...currentQueens];
+    let newHighestRowQueen = null;
+
+    for (; newHighestRowQueen === null && newQueens.length > 0; ) {
       // find queen in highest row
       const highestRowQueen = newQueens.reduce((acc, queen) => {
         return queen.row > acc.row ? queen : acc;
-      }, queens[0]);
+      }, newQueens[0]);
+
       // remove the highest row queen
       newQueens = newQueens.filter(q => !(q.row === highestRowQueen.row && q.col === highestRowQueen.col));
 
@@ -179,21 +212,66 @@ export default function HomePage() {
       for (let col = highestRowQueen.col + 1; col < BOARD_SIZE; col++) {
         if (currentSafetyMap[highestRowQueen.row][col]) {
           newHighestRowQueen = { row: highestRowQueen.row, col };
-          break
+          break;
         }
       }
-
-      if (newQueens.length === 0) {
-        break
-      }
-      // not possible to move this queen, so try the next highest row queen
     }
 
     if (newHighestRowQueen) {
       newQueens.push(newHighestRowQueen);
     }
-    setQueens(newQueens);
-    updateSafetyMap(newQueens);
+
+    return newQueens;
+  };
+
+  // Common function to place or move the next queen
+  const placeOrMoveNextQueen = (currentQueens: QueenPosition[]): {
+    message: string,
+    success: boolean,
+    newQueens: QueenPosition[]
+  } => {
+    // Try to place the next queen
+    const nextQueen = findNextQueenPosition(currentQueens);
+
+    if (nextQueen) {
+      const newQueens = [...currentQueens, nextQueen];
+      const squareName = `${String.fromCharCode(65 + nextQueen.col)}${BOARD_SIZE - nextQueen.row}`;
+      setQueens(newQueens);
+      updateSafetyMap(newQueens);
+      return {
+        message: `Queen placed at ${squareName}.`,
+        success: true,
+        newQueens
+      };
+    }
+
+    // No valid position found, need to backtrack
+    const backtrackResult = backtrackQueens(currentQueens);
+    if (backtrackResult.length === 0) {
+      setQueens([]);
+      updateSafetyMap([]);
+      return {
+        message: "No solution found.",
+        success: false,
+        newQueens: []
+      };
+    }
+
+    setQueens(backtrackResult);
+    updateSafetyMap(backtrackResult);
+    return {
+      message: `Backtracking... ${backtrackResult.length} queens remaining.`,
+      success: true,
+      newQueens: backtrackResult
+    };
+  };
+
+  // Add a function to place the next queen in a safe position
+  const handleSolveNext = () => {
+    if (!isClient || isToastActive) return;
+
+    const result = placeOrMoveNextQueen(queens);
+    setStatusMessage(result.message);
   }
 
   return (
