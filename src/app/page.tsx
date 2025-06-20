@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Chessboard } from "@/components/chessboard";
 import { solveNQueens, type QueenPosition } from "@/lib/nqueens";
+import { useToast } from "@/hooks/use-toast";
 import { Sparkles, Trash2, ChevronRight } from "lucide-react";
 
 const BOARD_SIZE = 8;
@@ -16,6 +17,8 @@ export default function HomePage() {
   const [safetyMap, setSafetyMap] = useState<boolean[][]>(Array(BOARD_SIZE).fill(0).map(() => Array(BOARD_SIZE).fill(true)));
   // Add a new state to track temporarily highlighted squares
   const [highlightedSquare, setHighlightedSquare] = useState<{row: number, col: number} | null>(null);
+  const [isToastActive, setIsToastActive] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     setIsClient(true);
@@ -23,31 +26,53 @@ export default function HomePage() {
     // handleSolve(); // Uncomment if you want board solved on load
   }, []);
 
+  // Check if all 8 queens are placed and display "Solved!" message
+  useEffect(() => {
+    if (queens.length === BOARD_SIZE) {
+      setStatusMessage("Solved!");
+      setIsToastActive(true);
+
+      toast({
+        title: "🎉 Congratulations!",
+        description: "You've successfully solved the 8-Queens puzzle!",
+        duration: 3000, // 3 seconds
+      });
+
+      // Disable input for 3 seconds
+      setTimeout(() => {
+        setIsToastActive(false);
+      }, 3000);
+    }
+  }, [queens, toast]);
+
   const handleSolve = () => {
-    if (!isClient) return; 
+    if (!isClient || isToastActive) return;
     const solution = solveNQueens(BOARD_SIZE);
     if (solution) {
       setQueens(solution);
       updateSafetyMap(solution);
       setStatusMessage("Puzzle solved! A random solution is displayed.");
     } else {
-      setQueens([]); 
+      setQueens([]);
       updateSafetyMap([]);
       setStatusMessage("No solution found for this board size.");
     }
   };
 
   const handleClear = () => {
+    if (isToastActive) return;
     setQueens([]);
     updateSafetyMap([]);
     setStatusMessage("Board cleared. Place queens or click 'Solve'.");
   };
 
   const handleSquareClick = (row: number, col: number) => {
+    if (isToastActive) return;
+
     // Check if there's already a queen at this position
     const isQueenPresent = queens.some(q => q.row === row && q.col === col);
     const squareName = `${String.fromCharCode(65 + col)}${BOARD_SIZE - row}`;
-    
+
     // If there's a queen, remove it
     if (isQueenPresent) {
       setStatusMessage(`Queen removed from ${squareName}.`);
@@ -114,7 +139,7 @@ export default function HomePage() {
 
   // Add a function to place the next queen in a safe position
   const handleSolveNext = () => {
-    if (!isClient) return;
+    if (!isClient || isToastActive) return;
     
     // Find the next safe position
     for (let row = 0; row < BOARD_SIZE; row++) {
@@ -187,6 +212,7 @@ export default function HomePage() {
               safetyMap={safetyMap}
               highlightedSquare={highlightedSquare}
               onSquareClick={handleSquareClick}
+              disabled={isToastActive}
               className="w-full max-w-md border-2 border-primary/20 rounded-lg"
             />
           ) : (
@@ -199,13 +225,27 @@ export default function HomePage() {
           </p>
         </CardContent>
         <CardFooter className="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4 pt-6">
-          <Button onClick={handleSolve} className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow bg-primary hover:bg-primary/90 text-primary-foreground">
+          <Button
+            onClick={handleSolve}
+            disabled={isToastActive}
+            className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow bg-primary hover:bg-primary/90 text-primary-foreground"
+          >
             <Sparkles className="mr-2 h-5 w-5" /> Solve Puzzle
           </Button>
-          <Button onClick={handleSolveNext} variant="outline" className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow">
+          <Button
+            onClick={handleSolveNext}
+            disabled={isToastActive}
+            variant="outline"
+            className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
+          >
             <ChevronRight className="mr-2 h-5 w-5" /> Solve Next
           </Button>
-          <Button onClick={handleClear} variant="secondary" className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow">
+          <Button
+            onClick={handleClear}
+            disabled={isToastActive}
+            variant="secondary"
+            className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
+          >
             <Trash2 className="mr-2 h-5 w-5" /> Clear Board
           </Button>
         </CardFooter>

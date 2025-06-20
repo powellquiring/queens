@@ -11,6 +11,7 @@ interface ChessboardProps {
   highlightedSquare?: {row: number, col: number} | null;
   onSquareClick: (row: number, col: number) => void;
   className?: string;
+  disabled?: boolean;
 }
 
 export function Chessboard({
@@ -20,6 +21,7 @@ export function Chessboard({
   highlightedSquare,
   onSquareClick,
   className,
+  disabled = false,
 }: ChessboardProps) {
   const getSquareColor = (row: number, col: number) => {
     // If this is the highlighted square, show it in red
@@ -64,13 +66,15 @@ export function Chessboard({
           <button
             key={`${row}-${col}`}
             onClick={() => onSquareClick(row, col)}
+            disabled={disabled}
             className={cn(
               "aspect-square flex items-center justify-center p-1 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 rounded-sm",
               getSquareColor(row, col),
               // Change hover color based on safety
               isSafe ? "hover:bg-accent/20" : "hover:bg-red-400/50",
               "transition-colors duration-150",
-              !isSafe && !hasQueen && "after:content-['×'] after:text-red-500 after:opacity-50 after:text-lg after:font-bold"
+              !isSafe && !hasQueen && "after:content-['×'] after:text-red-500 after:opacity-50 after:text-lg after:font-bold",
+              disabled && "opacity-50 cursor-not-allowed"
             )}
             aria-label={`Square ${squareLabel}, ${hasQueen ? "has a queen" : isSafe ? "empty" : "under attack"}`}
             role="gridcell"
