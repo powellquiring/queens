@@ -29,6 +29,7 @@ export default function HomePage() {
 
   // Use ref for immediate stop signal that can be checked in async loops
   const shouldStopRef = useRef(false);
+  const shouldFinishRef = useRef(false);
 
   const { toast } = useToast();
 
@@ -62,6 +63,7 @@ export default function HomePage() {
 
     setIsSolving(true);
     shouldStopRef.current = false;
+    shouldFinishRef.current = false;
     setIsPaused(false);
     setStatusMessage("Solving puzzle step by step...");
 
@@ -97,11 +99,29 @@ export default function HomePage() {
 
       // Check if we should stop before the delay
       if (shouldStopRef.current) {
-        // Save current state for potential resume
-        setSolveState({ attempts, currentQueens });
-        setIsPaused(true);
         setIsSolving(false);
-        setStatusMessage("Solving paused. Choose an option to continue.");
+
+        // If finish was requested, immediately continue without delays
+        if (shouldFinishRef.current) {
+          shouldFinishRef.current = false;
+          setSolveState({ attempts, currentQueens });
+          setIsPaused(true);
+          setStatusMessage("Finishing solve without delays...");
+          setTimeout(() => handleSolve(false), 10);
+          return;
+        }
+
+        // If it's a true stop (not finish), check if we should save state
+        if (isPaused || solveState) {
+          // This was a pause request, save state
+          setSolveState({ attempts, currentQueens });
+          setIsPaused(true);
+          setStatusMessage("Solving paused. Choose an option to continue.");
+        } else {
+          // This was a stop request, don't save state
+          shouldStopRef.current = false;
+          setStatusMessage("Solving stopped. Current state preserved.");
+        }
         return;
       }
 
@@ -116,10 +136,27 @@ export default function HomePage() {
     if (currentQueens.length === BOARD_SIZE) {
       setStatusMessage("Puzzle solved step by step!");
     } else if (shouldStopRef.current) {
-      // Save current state for potential resume
-      setSolveState({ attempts, currentQueens });
-      setIsPaused(true);
-      setStatusMessage("Solving paused. Choose an option to continue.");
+      // If finish was requested, immediately continue without delays
+      if (shouldFinishRef.current) {
+        shouldFinishRef.current = false;
+        setSolveState({ attempts, currentQueens });
+        setIsPaused(true);
+        setStatusMessage("Finishing solve without delays...");
+        setTimeout(() => handleSolve(false), 10);
+        return;
+      }
+
+      // If it's a true stop (not finish), check if we should save state
+      if (isPaused || solveState) {
+        // This was a pause request, save state
+        setSolveState({ attempts, currentQueens });
+        setIsPaused(true);
+        setStatusMessage("Solving paused. Choose an option to continue.");
+      } else {
+        // This was a stop request, don't save state
+        shouldStopRef.current = false;
+        setStatusMessage("Solving stopped. Current state preserved.");
+      }
     } else {
       setQueens([]);
       updateSafetyMap([]);
@@ -127,27 +164,37 @@ export default function HomePage() {
     }
   };
 
-  const handleStop = () => {
-    shouldStopRef.current = true;
-  };
-
   const handleContinue = () => {
-    if (solveState) {
-      handleSolve(true); // Resume with delays
+    if (isSolving) {
+      // If currently solving, pause it
+      shouldStopRef.current = true;
+    } else if (solveState || isPaused) {
+      // If paused, resume with delays
+      handleSolve(true);
     }
   };
 
   const handleFinish = () => {
-    if (solveState) {
-      handleSolve(false); // Resume without delays
+    if (isSolving) {
+      // If currently solving, set flags to stop and then finish without delays
+      shouldStopRef.current = true;
+      shouldFinishRef.current = true;
+      setStatusMessage("Finishing solve without delays...");
+    } else if (solveState || isPaused) {
+      // If paused, resume without delays
+      handleSolve(false);
     }
   };
 
   const handleStopFinal = () => {
+    // First stop the solving process if it's running
+    shouldStopRef.current = true;
+    shouldFinishRef.current = false;
+
+    // Then clean up the state
     setSolveState(null);
     setIsPaused(false);
     setIsSolving(false);
-    shouldStopRef.current = false;
     setStatusMessage("Solving stopped. Current state preserved.");
   };
 
@@ -366,48 +413,22 @@ export default function HomePage() {
           </p>
         </CardContent>
         <CardFooter className="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4 pt-6">
-          {!isPaused ? (
-            <>
-              <Button
-                onClick={isSolving ? handleStop : () => handleSolve(true)}
-                disabled={isToastActive}
-                className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow bg-primary hover:bg-primary/90 text-primary-foreground"
-              >
-                {isSolving ? (
-                  <>
-                    <Square className="mr-2 h-5 w-5" /> Stop
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="mr-2 h-5 w-5" /> Solve Puzzle
-                  </>
-                )}
-              </Button>
-              <Button
-                onClick={handleSolveNext}
-                disabled={isToastActive || isSolving}
-                variant="outline"
-                className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
-              >
-                <ChevronRight className="mr-2 h-5 w-5" /> Solve Next
-              </Button>
-              <Button
-                onClick={handleClear}
-                disabled={isToastActive || isSolving}
-                variant="secondary"
-                className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
-              >
-                <Trash2 className="mr-2 h-5 w-5" /> Clear Board
-              </Button>
-            </>
-          ) : (
+          {isSolving || isPaused ? (
             <>
               <Button
                 onClick={handleContinue}
                 disabled={isToastActive}
                 className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow bg-primary hover:bg-primary/90 text-primary-foreground"
               >
-                <Play className="mr-2 h-5 w-5" /> Continue
+                {isSolving ? (
+                  <>
+                    <Square className="mr-2 h-5 w-5" /> Pause
+                  </>
+                ) : (
+                  <>
+                    <Play className="mr-2 h-5 w-5" /> Continue
+                  </>
+                )}
               </Button>
               <Button
                 onClick={handleFinish}
@@ -424,6 +445,32 @@ export default function HomePage() {
                 className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
               >
                 <Square className="mr-2 h-5 w-5" /> Stop
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                onClick={() => handleSolve(true)}
+                disabled={isToastActive}
+                className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow bg-primary hover:bg-primary/90 text-primary-foreground"
+              >
+                <Sparkles className="mr-2 h-5 w-5" /> Solve Puzzle
+              </Button>
+              <Button
+                onClick={handleSolveNext}
+                disabled={isToastActive}
+                variant="outline"
+                className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
+              >
+                <ChevronRight className="mr-2 h-5 w-5" /> Solve Next
+              </Button>
+              <Button
+                onClick={handleClear}
+                disabled={isToastActive}
+                variant="secondary"
+                className="w-full sm:w-auto shadow-md hover:shadow-lg transition-shadow"
+              >
+                <Trash2 className="mr-2 h-5 w-5" /> Clear Board
               </Button>
             </>
           )}
